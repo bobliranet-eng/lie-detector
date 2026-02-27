@@ -33,7 +33,7 @@ from .utils import get_models_dir
 
 logger = logging.getLogger(__name__)
 
-_SYNTHETIC_N_PER_CLASS = 600   # samples per class for the pre-trained model
+_SYNTHETIC_N_PER_CLASS = 1000  # samples per class for the pre-trained model
 _MIN_SAMPLES_PER_CLASS = 3     # minimum real samples before retraining
 
 
@@ -239,11 +239,17 @@ class LieDetectorModel:
 
         truth_prob = float(proba[truth_idx])
         lie_prob = float(proba[lie_idx])
+
+        # Dampen toward 0.5 for synthetic/pretrained models — they lack real data
+        if self.metadata.get("synthetic", False):
+            truth_prob = 0.5 + (truth_prob - 0.5) * 0.6
+            lie_prob = 1.0 - truth_prob
+
         confidence = float(max(truth_prob, lie_prob))
 
-        if truth_prob >= 0.70:
+        if truth_prob >= 0.58:
             prediction = "Truth"
-        elif lie_prob >= 0.70:
+        elif lie_prob >= 0.58:
             prediction = "Lie"
         else:
             prediction = "Uncertain"
@@ -397,13 +403,13 @@ class LieDetectorModel:
         indicators: dict[str, str] = {}
 
         f0_std = features.get("f0_std", 0.0)
-        indicators["Pitch Variability"] = level(f0_std, 10.0, 30.0)
+        indicators["Pitch Variability"] = level(f0_std, 15.0, 45.0)
 
         jitter = features.get("jitter", 0.0)
-        indicators["Voice Tremor (Jitter)"] = level(jitter, 0.003, 0.015)
+        indicators["Voice Tremor (Jitter)"] = level(jitter, 0.005, 0.020)
 
         shimmer = features.get("shimmer", 0.0)
-        indicators["Amplitude Instability (Shimmer)"] = level(shimmer, 0.03, 0.10)
+        indicators["Amplitude Instability (Shimmer)"] = level(shimmer, 0.03, 0.15)
 
         pause_count = features.get("pause_count", 0.0)
         indicators["Pause Frequency"] = level(pause_count, 1.0, 5.0)
@@ -415,7 +421,7 @@ class LieDetectorModel:
         indicators["Speaking Ratio"] = level(speech_ratio, 0.50, 0.85)
 
         hnr = features.get("hnr", 0.0)
-        indicators["Voice Clarity (HNR)"] = level(hnr, -0.5, 0.5)
+        indicators["Voice Clarity (HNR)"] = level(hnr, 0.2, 1.2)
 
         return indicators
 
@@ -467,15 +473,15 @@ def _sample_features(
     def r(mu: float, sigma: float, lo: float = 0.0, hi: float = 1e9) -> float:
         return float(np.clip(rng.normal(mu, sigma), lo, hi))
 
-    # Pitch (Hz)
-    f0_mean = r(165, 25) if is_lie else r(145, 20)
-    f0_std = r(28, 10, 1) if is_lie else r(14, 5, 1)
+    # Pitch (Hz) — wide overlap, subtle lie shift (~10-15 Hz)
+    f0_mean = r(145, 30) if is_lie else r(130, 30)
+    f0_std = r(30, 10, 1) if is_lie else r(22, 8, 1)
     f0_range = f0_std * 3.5
     f0_min = max(f0_mean - f0_range / 2, 60.0)
     f0_max = f0_mean + f0_range / 2
 
-    # Jitter
-    jitter = r(0.014, 0.005, 0.001) if is_lie else r(0.005, 0.002, 0.001)
+    # Jitter — subtle difference, realistic range 0.003-0.025
+    jitter = r(0.015, 0.006, 0.002) if is_lie else r(0.008, 0.004, 0.002)
 
     # Voiced fraction
     voiced_frac = r(0.62, 0.10, 0.1, 1.0) if is_lie else r(0.76, 0.08, 0.1, 1.0)
@@ -501,7 +507,7 @@ def _sample_features(
     spec_bw = r(2200, 400)
     zcr_mean = r(0.08, 0.02, 0.001) if is_lie else r(0.065, 0.015, 0.001)
     zcr_std = r(0.04, 0.01, 0.001)
-    hnr = r(-0.3, 0.4) if is_lie else r(0.4, 0.4)
+    hnr = r(0.2, 0.6, -1.0, 2.0) if is_lie else r(0.9, 0.5, -1.0, 2.0)
 
     fd: dict[str, float] = {
         "f0_mean": f0_mean,
@@ -532,15 +538,25 @@ def _sample_features(
         "hnr": hnr,
     }
 
-    # MFCCs (correlated noise per class)
-    mfcc_bias = [0.5, -0.3, 0.2, -0.1, 0.2, -0.1, 0.1, 0.0, 0.1, -0.1, 0.1, 0.0, 0.1]
-    for i in range(1, 14):
-        bias = mfcc_bias[i - 1] * (1.0 if is_lie else -1.0)
-        fd[f"mfcc_{i}_mean"] = r(bias, 2.0)
-        fd[f"mfcc_{i}_std"] = r(1.5 if is_lie else 1.0, 0.3, 0.1)
+    # MFCCs — realistic librosa ranges; mfcc_1 is the dominant (DC-like) coefficient
+    # Real speech: mfcc_1 ~= -200 to -100; mfcc_2+ decreasing in magnitude
+    # Truth/lie differences are subtle (~5-10 units on a ±30-40 sigma)
+    mfcc1_mu = -170.0 if is_lie else -180.0
+    fd["mfcc_1_mean"] = r(mfcc1_mu, 35.0)
+    fd["mfcc_1_std"] = r(18.0 if is_lie else 15.0, 5.0, 2.0)
 
-    fd["delta_mfcc_mean"] = r(0.1 if is_lie else -0.05, 0.3)
-    fd["delta_mfcc_std"] = r(0.8 if is_lie else 0.5, 0.2, 0.05)
+    # Baseline means and subtle lie shifts for mfcc 2-13
+    _mfcc_base  = [32, -12, 8, -5, 4, -3, 2, -2, 2, -1, 1, -1]
+    _mfcc_shift = [ 5,  -3, 2, -1, 2, -1, 1,  0, 1, -1, 1,  0]
+    for i in range(2, 14):
+        base = _mfcc_base[i - 2]
+        shift = _mfcc_shift[i - 2] if is_lie else 0.0
+        sigma = max(16.0 - (i - 2) * 0.9, 8.0)
+        fd[f"mfcc_{i}_mean"] = r(base + shift, sigma)
+        fd[f"mfcc_{i}_std"] = r(18.0 if is_lie else 15.0, 5.0, 2.0)
+
+    fd["delta_mfcc_mean"] = r(0.05 if is_lie else -0.02, 0.5)
+    fd["delta_mfcc_std"] = r(4.0 if is_lie else 3.5, 0.8, 0.5)
 
     # Validate names match the spec
     for name in feature_names:

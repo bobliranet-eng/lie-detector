@@ -1,101 +1,55 @@
-# Lie Detector - Voice Deception Analysis System
+# Complete the Lie Detector App
 
-Build a complete Python application for voice-based lie/truth detection with a trainable model and modern web UI.
+The project is 90% built. You need to:
 
-## Requirements
-
-### Core Engine (Python)
-1. **Audio Analysis** using `librosa` + `openSMILE` (via `opensmile` Python package):
-   - Extract features: pitch (F0), jitter, shimmer, speech rate, pauses, energy, MFCCs, formants
-   - Normalize features per-speaker
-   
-2. **Trainable ML Model**:
-   - Use `scikit-learn` ensemble (RandomForest + GradientBoosting + SVM voting classifier)
-   - Store trained models with `joblib`
-   - Users can label recordings as "truth" or "lie" to train/retrain
-   - Include a pre-built feature set so the app works out of the box (ship a small pretrained model on synthetic data)
-   - Model versioning: save each trained model with timestamp
-
-3. **Speech-to-Text** (optional but nice): use `faster-whisper` for transcription, then run basic linguistic analysis (hedging words, pronoun usage, cognitive load markers) — multilingual support via whisper
-
-### Web UI (Gradio)
-Modern, clean interface with:
-1. **Upload tab**: Upload audio file (wav, mp3, m4a, ogg, flac) → get truth/lie prediction with percentage + color gauge
-   - Green (>70% truth) → Yellow (50-70%) → Red (>70% lie)
-   - Show feature breakdown: which indicators triggered
-   - Show waveform visualization
-
-2. **Training tab**: 
-   - Upload labeled recordings (select "truth" or "lie" for each)
-   - Batch upload support
-   - Show training progress and model accuracy
-   - Button to retrain model
-   - Show dataset stats (how many truth/lie samples)
-
-3. **History tab**:
-   - List of all analyzed recordings with results
-   - SQLite backend for persistence
-
-4. **Dashboard**:
-   - Model accuracy stats
-   - Feature importance chart
-   - Dataset distribution
-
-### Architecture
+## 1. Create `run.py` (missing)
+Entry point that initializes all singletons and launches the Gradio app.
+```python
+# Pattern: see ui/app.py build_app() signature
+from detector.audio_features import AudioFeatureExtractor
+from detector.text_features import TextFeatureExtractor  
+from detector.model import LieDetectorModel
+from detector.database import Database
+from ui.app import build_app
 ```
-lie-detector/
-├── README.md
-├── requirements.txt
-├── setup.py
-├── run.py                  # Entry point
-├── detector/
-│   ├── __init__.py
-│   ├── audio_features.py   # librosa + opensmile feature extraction
-│   ├── text_features.py    # linguistic analysis via whisper
-│   ├── model.py            # ML model training + prediction
-│   ├── database.py         # SQLite storage
-│   └── utils.py
-├── ui/
-│   ├── __init__.py
-│   ├── app.py              # Gradio app
-│   ├── components.py       # UI components
-│   └── visualizations.py   # Charts, gauges, waveforms
-├── models/                 # Saved trained models
-├── data/                   # Training data storage
-└── tests/
-    └── test_detector.py
+- Accept --port, --host, --share, --debug CLI args
+- BASE_DIR = project root, DATA_DIR = data/, MODELS_DIR = models/, DB_PATH = data/lie_detector.db
+
+## 2. Add MICROPHONE recording to the UI
+In `ui/app.py`, the Analysis tab has:
+```python
+audio_input = gr.Audio(label="Upload Audio Recording", type="filepath", sources=["upload"])
 ```
+Change `sources` to `["upload", "microphone"]` so users can record directly from their laptop mic.
 
-### Technical Constraints
-- Python 3.10+
-- All text/UI should be in English (the ANALYSIS works on any language audio)
-- Use type hints everywhere
-- Include proper error handling
-- Make it pip-installable
-- The app should work even without a trained model (show "untrained" state and guide user to train)
+Also in the Training tab, same change for `train_audio_input`.
 
-### Key Libraries
-- `librosa` - audio analysis
-- `opensmile` - professional audio features
-- `scikit-learn` - ML models
-- `gradio` - web UI
-- `faster-whisper` - speech to text (multilingual)
-- `plotly` - charts and visualizations
-- `numpy`, `pandas` - data handling
-- `joblib` - model serialization
-- `pydub` - audio format conversion
+## 3. Create `tests/test_detector.py`
+Basic tests:
+- Test AudioFeatureExtractor can be instantiated
+- Test LieDetectorModel can be instantiated and has is_trained property
+- Test Database can be created with temp path
+- Test utils functions work
 
-### Run
+## 4. Update README.md
+Professional README with:
+- Project description
+- Features list
+- Installation instructions (pip install -r requirements.txt)
+- Usage (python run.py)
+- Screenshots placeholder
+- Architecture overview
+- How training works
+- Supported audio formats
+- Multilingual support explanation
+
+## 5. Git commit everything
 ```bash
-pip install -r requirements.txt
-python run.py
+git add -A && git commit -m "feat: complete lie detector with trainable model, Gradio UI, and mic recording"
 ```
-Opens Gradio UI on localhost.
 
 ## IMPORTANT
-- Write ALL files completely, no placeholders
-- Make it production-quality code
-- Include comprehensive error handling
-- The UI must look modern and professional
-- Test that imports work
-- When completely finished, run: openclaw system event --text "Done: Built lie detector with trainable model, audio analysis (librosa+opensmile), and Gradio UI" --mode now
+- Read existing files before modifying to understand the codebase
+- Do NOT rewrite files that already work — only create missing ones or make targeted edits
+- The app must be functional
+- When completely finished, run: openclaw system event --text "Done: Lie detector complete with mic recording, tests, and README" --mode now

@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# App data
+data/*.db
+data/*.sqlite
+
+# Models (generated; only keep .gitkeep)
+models/*.joblib
+
+# OS
+.DS_Store

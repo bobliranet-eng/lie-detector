@@ -1,0 +1,9 @@
+# Optional dependencies
+# Audio format conversion (mp3, m4a, ogg, flac):
+pydub>=0.25.1
+
+# Extended acoustic features (eGeMAPS via openSMILE):
+opensmile>=2.5.0
+
+# Speech-to-text transcription (linguistic deception markers):
+faster-whisper>=0.10.0

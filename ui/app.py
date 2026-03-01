@@ -20,7 +20,7 @@ from detector.audio_features import AudioFeatureExtractor
 from detector.text_features import TextFeatureExtractor
 from detector.model import LieDetectorModel
 from detector.database import Database
-from detector.utils import format_duration, get_prediction_label
+from detector.utils import format_duration
 
 from ui.components import (
     CUSTOM_CSS,
@@ -55,7 +55,10 @@ _db: Optional[Database] = None
 def _get_singletons() -> tuple[
     AudioFeatureExtractor, TextFeatureExtractor, LieDetectorModel, Database
 ]:
-    assert _audio_extractor and _text_extractor and _model and _db
+    if not (_audio_extractor and _text_extractor and _model and _db):
+        raise RuntimeError(
+            "App not initialised — call build_app() first."
+        )
     return _audio_extractor, _text_extractor, _model, _db
 
 
@@ -549,21 +552,24 @@ def build_app(
             with gr.Tab("📊 Dashboard", id="dashboard"):
                 refresh_dash_btn = gr.Button("🔄 Refresh Dashboard", variant="secondary")
 
-                dash_stats = gr.HTML(load_dashboard()[3])
+                # Compute once — avoids 4× repeated sklearn + DB work on startup
+                _initial_fi, _initial_dist, _initial_acc, _initial_stats = load_dashboard()
+
+                dash_stats = gr.HTML(_initial_stats)
 
                 with gr.Row():
                     dash_dist_fig = gr.Plot(
                         label="Dataset Distribution",
-                        value=load_dashboard()[1],
+                        value=_initial_dist,
                     )
                     dash_acc_fig = gr.Plot(
                         label="Accuracy History",
-                        value=load_dashboard()[2],
+                        value=_initial_acc,
                     )
 
                 dash_fi_fig = gr.Plot(
                     label="Feature Importances",
-                    value=load_dashboard()[0],
+                    value=_initial_fi,
                 )
 
                 def _refresh_dashboard():

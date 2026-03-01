@@ -378,7 +378,7 @@ class LieDetectorModel:
         """
         n = len(features_list)
         m = len(self.feature_names)
-        X = np.zeros((n, m), dtype=np.float32)
+        X = np.zeros((n, m), dtype=np.float64)  # float64: sklearn StandardScaler precision
         for i, fd in enumerate(features_list):
             for j, name in enumerate(self.feature_names):
                 val = fd.get(name, 0.0)

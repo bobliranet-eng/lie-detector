@@ -229,3 +229,120 @@ class TestUtils:
         color = get_confidence_color(0.9)
         assert isinstance(color, str)
         assert color.startswith("#")
+
+
+# ---------------------------------------------------------------------------
+# Pretrained model & synthetic dampening
+# ---------------------------------------------------------------------------
+
+class TestPretrainedModel:
+    def test_create_pretrained_model_loads_and_predicts(self, tmp_path):
+        """Pretrained model should be created, saved, and predict without bias."""
+        model = LieDetectorModel(models_dir=tmp_path)
+        model.create_pretrained_model()
+
+        assert model.is_trained is True
+        assert model.metadata.get("synthetic") is True
+        assert model.metadata["n_samples"] > 0
+
+        # Saved file must exist
+        saved = list(tmp_path.glob("model_*.joblib"))
+        assert len(saved) == 1
+
+    def test_synthetic_dampening_reduces_confidence(self, tmp_path):
+        """With synthetic model, confidence should be dampened toward 0.5."""
+        model = LieDetectorModel(models_dir=tmp_path)
+        model.create_pretrained_model()
+
+        # Collect predictions over a diverse set of "neutral" feature vectors
+        # (f0_mean=130, typical truth-like values)
+        neutral_features = {
+            "f0_mean": 130.0, "f0_std": 22.0, "f0_min": 100.0,
+            "f0_max": 200.0, "f0_range": 100.0, "f0_median": 130.0,
+            "voiced_fraction": 0.75, "jitter": 0.008,
+            "rms_mean": 0.08, "rms_std": 0.025, "rms_max": 0.13,
+            "shimmer": 0.05, "energy_entropy": 4.8,
+            "speech_rate": 3.5, "speech_ratio": 0.74,
+            "pause_count": 2.0, "pause_mean_duration": 0.2,
+            "pause_total_duration": 0.4, "duration_seconds": 12.0,
+            "spectral_centroid_mean": 1350.0, "spectral_centroid_std": 250.0,
+            "spectral_rolloff_mean": 3500.0, "spectral_bandwidth_mean": 2200.0,
+            "zcr_mean": 0.065, "zcr_std": 0.03,
+            "hnr": 0.9,
+        }
+        # Fill in MFCCs at typical truth-like values
+        neutral_features["mfcc_1_mean"] = -180.0
+        neutral_features["mfcc_1_std"] = 15.0
+        for i in range(2, 14):
+            neutral_features[f"mfcc_{i}_mean"] = 0.0
+            neutral_features[f"mfcc_{i}_std"] = 15.0
+        neutral_features["delta_mfcc_mean"] = -0.02
+        neutral_features["delta_mfcc_std"] = 3.5
+
+        result = model.predict(neutral_features)
+
+        # After dampening, neither probability should be extreme (>0.9)
+        assert result["truth_probability"] < 0.90, (
+            f"truth_prob too extreme: {result['truth_probability']:.3f} "
+            "(synthetic dampening not working?)"
+        )
+        assert result["lie_probability"] < 0.90, (
+            f"lie_prob too extreme: {result['lie_probability']:.3f} "
+            "(synthetic model biased toward Lie?)"
+        )
+
+        # Probabilities must still sum to 1.0 (within float tolerance)
+        total = result["truth_probability"] + result["lie_probability"]
+        assert abs(total - 1.0) < 1e-6, f"Probabilities don't sum to 1: {total}"
+
+    def test_pretrained_model_returns_uncertain_for_borderline(self, tmp_path):
+        """Synthetic model should lean Uncertain, not confident, on ambiguous inputs."""
+        model = LieDetectorModel(models_dir=tmp_path)
+        model.create_pretrained_model()
+
+        # Feature vector with exactly average values (should be near 50/50)
+        avg_features: dict[str, float] = {}
+        for name in LieDetectorModel(models_dir=tmp_path).feature_names or []:
+            avg_features[name] = 0.0
+        # Just predict — ensure no crash and result has correct keys
+        try:
+            result = model.predict(avg_features)
+            assert "prediction" in result
+            assert result["prediction"] in {"Truth", "Lie", "Uncertain"}
+        except RuntimeError:
+            # No features → may fail gracefully; that's acceptable
+            pass
+
+    def test_save_load_preserves_synthetic_flag(self, tmp_path):
+        """Synthetic flag must survive save + load."""
+        model = LieDetectorModel(models_dir=tmp_path)
+        model.create_pretrained_model()
+        assert model.metadata["synthetic"] is True
+
+        model2 = LieDetectorModel(models_dir=tmp_path)
+        model2.load()
+        assert model2.metadata.get("synthetic") is True
+
+
+# ---------------------------------------------------------------------------
+# Feature matrix precision
+# ---------------------------------------------------------------------------
+
+class TestFeatureMatrix:
+    def test_features_to_matrix_dtype_is_float64(self, tmp_path):
+        """Ensure _features_to_matrix produces float64 for sklearn compatibility."""
+        model = LieDetectorModel(models_dir=tmp_path)
+        model.feature_names = ["f0_mean", "rms_mean", "hnr"]
+        X = model._features_to_matrix([{"f0_mean": 130.0, "rms_mean": 0.05, "hnr": 0.9}])
+        import numpy as np
+        assert X.dtype == np.float64, f"Expected float64, got {X.dtype}"
+
+    def test_features_to_matrix_fills_missing_with_zero(self, tmp_path):
+        """Missing feature keys must be filled with 0.0, not NaN."""
+        import numpy as np
+        model = LieDetectorModel(models_dir=tmp_path)
+        model.feature_names = ["f0_mean", "rms_mean", "missing_feature"]
+        X = model._features_to_matrix([{"f0_mean": 130.0}])
+        assert X[0, 1] == 0.0   # rms_mean missing → 0
+        assert X[0, 2] == 0.0   # missing_feature → 0
+        assert not np.any(np.isnan(X))

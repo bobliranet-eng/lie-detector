@@ -6,6 +6,7 @@ Usage:
 
 import argparse
 import logging
+import socket
 from pathlib import Path
 
 from detector.audio_features import AudioFeatureExtractor
@@ -14,6 +15,7 @@ from detector.model import LieDetectorModel
 from detector.database import Database
 from detector.utils import configure_logging
 from ui.app import build_app
+from ui.components import CUSTOM_CSS
 
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
@@ -28,6 +30,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--share", action="store_true", help="Create a public Gradio share link")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     return parser.parse_args()
+
+
+def _is_port_available(host: str, port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((host, port))
+        except OSError:
+            return False
+    return True
+
+
+def _pick_port(host: str, preferred: int, max_tries: int = 10) -> int:
+    for offset in range(max_tries):
+        port = preferred + offset
+        if _is_port_available(host, port):
+            return port
+    raise OSError(f"No available port found in range {preferred}-{preferred + max_tries - 1}.")
 
 
 def main() -> None:
@@ -52,11 +72,16 @@ def main() -> None:
     logger.info("Building Gradio app...")
     demo = build_app(audio_extractor, text_extractor, model, database)
 
-    logger.info("Launching on %s:%d (share=%s)", args.host, args.port, args.share)
+    port = _pick_port(args.host, args.port)
+    if port != args.port:
+        logger.warning("Port %d is busy; using %d instead.", args.port, port)
+
+    logger.info("Launching on %s:%d (share=%s)", args.host, port, args.share)
     demo.launch(
         server_name=args.host,
-        server_port=args.port,
+        server_port=port,
         share=args.share,
+        css=CUSTOM_CSS,
     )
 
 

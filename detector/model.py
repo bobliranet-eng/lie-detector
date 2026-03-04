@@ -374,15 +374,24 @@ class LieDetectorModel:
     ) -> np.ndarray:
         """Convert a list of feature dicts to a 2-D NumPy array.
 
-        Missing features are filled with 0.
+        Missing or invalid features are set to NaN for imputation.
         """
+        use_nan = self._pipeline is None or (
+            hasattr(self._pipeline, "named_steps") and "imputer" in self._pipeline.named_steps
+        )
+        fill_value = np.nan if use_nan else 0.0
         n = len(features_list)
         m = len(self.feature_names)
-        X = np.zeros((n, m), dtype=np.float32)
+        X = np.full((n, m), fill_value, dtype=np.float32)
         for i, fd in enumerate(features_list):
             for j, name in enumerate(self.feature_names):
-                val = fd.get(name, 0.0)
-                X[i, j] = float(val) if np.isfinite(float(val)) else 0.0
+                if name not in fd:
+                    continue
+                val = float(fd.get(name, np.nan))
+                if np.isfinite(val):
+                    X[i, j] = val
+                else:
+                    X[i, j] = np.nan if use_nan else 0.0
         return X
 
     def _latest_model_path(self) -> Optional[Path]:

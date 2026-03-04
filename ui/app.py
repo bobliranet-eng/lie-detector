@@ -363,7 +363,7 @@ def build_app(
     _model = model
     _db = database
 
-    with gr.Blocks(css=CUSTOM_CSS, title="Lie Detector") as demo:
+    with gr.Blocks(title="Lie Detector") as demo:
 
         # ── Header ──────────────────────────────────────────────────────
         gr.HTML(HEADER_HTML)
